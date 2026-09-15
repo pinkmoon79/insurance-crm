@@ -3,326 +3,228 @@ import pandas as pd
 import sqlite3
 from datetime import datetime
 from urllib.parse import quote
-import os
+from PIL import Image
+import io
 
-# ============================================================================
-# 🎨 페이지 설정 및 스타일
-# ============================================================================
+st.set_page_config(page_title="보험 CRM", page_icon="🛡️", layout="wide")
 
-st.set_page_config(
-    page_title="보험 파이프라인 CRM",
-    page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# 다크모드 CSS
-st.markdown("""
-<style>
-    :root {
-        --primary-bg: #0f1419;
-        --secondary-bg: #1a202c;
-        --accent-blue: #4a90e2;
-        --accent-red: #ff4757;
-        --text-primary: #ffffff;
-    }
-    
-    body { background-color: var(--primary-bg) !important; }
-    .stApp { background-color: var(--primary-bg) !important; }
-    .stButton > button { background-color: var(--accent-blue) !important; color: white !important; }
-    .badge-status { background-color: var(--accent-red); padding: 4px 8px; border-radius: 4px; color: white; font-weight: bold; }
-    .customer-card { border: 1px solid #2d3748; padding: 16px; border-radius: 8px; margin: 8px 0; background-color: var(--secondary-bg); }
-    .timeline-box { background-color: #0f1419; border-left: 3px solid var(--accent-blue); padding: 12px; margin: 8px 0; border-radius: 4px; }
-</style>
-""", unsafe_allow_html=True)
-
-# ============================================================================
-# 🛡️ 보안 로그인 (Streamlit Cloud 호환)
-# ============================================================================
-
-DB_PATH = "insurance_crm.db"
-
-def init_database():
-    """SQLite 데이터베이스 초기화"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # 고객 정보 테이블
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS customers (
-        customer_id TEXT PRIMARY KEY,
-        name TEXT,
-        phone TEXT,
-        region TEXT,
-        address TEXT,
-        cancer_coverage REAL,
-        brain_coverage REAL
-    )
-    """)
-    
-    # 상담 노트 테이블
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS consultation_notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id TEXT,
-        note_type TEXT,
-        content TEXT,
-        date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
-    )
-    """)
-    
-    conn.commit()
-    conn.close()
-
-# 로그인 상태 초기화
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
-# ============================================================================
-# 🔐 로그인 페이지
-# ============================================================================
-
 if not st.session_state.logged_in:
-    st.markdown("## 🛡️ 보험 파이프라인 CRM - 보안 로그인")
-    st.markdown("---")
-    
+    st.title("🛡️ 로그인")
     col1, col2, col3 = st.columns([1, 2, 1])
-    
     with col2:
-        username = st.text_input("ID", placeholder="master", key="login_id")
-        password = st.text_input("Password", type="password", placeholder="••••••••", key="login_pw")
-        
-        if st.button("🔓 로그인", use_container_width=True):
-            # Streamlit Cloud에서는 st.secrets 사용, 로컬에서는 하드코드
-            try:
-                stored_id = st.secrets.get("master_id", "master")
-                stored_pw = st.secrets.get("master_password", "pipe7979!")
-            except:
-                stored_id = "master"
-                stored_pw = "pipe7979!"
-            
-            if username.strip() == stored_id and password.strip() == stored_pw:
+        u = st.text_input("ID")
+        p = st.text_input("PW", type="password")
+        if st.button("로그인"):
+            if u == st.secrets.get("master_id", "master") and p == st.secrets.get("master_password", "pipe7979!"):
                 st.session_state.logged_in = True
-                st.success("✅ 로그인 성공!")
                 st.rerun()
             else:
-                st.error("❌ ID 또는 비밀번호가 올바르지 않습니다.")
-
+                st.error("오류")
 else:
-    # ========================================================================
-    # ✅ 메인 CRM 화면 (로그인 성공 후)
-    # ========================================================================
-    
-    init_database()
-    
-    # 로그아웃 버튼
-    if st.sidebar.button("🚪 로그아웃", use_container_width=True):
+    if st.sidebar.button("로그아웃"):
         st.session_state.logged_in = False
         st.rerun()
     
-    st.markdown("## 🛡️ 보험 파이프라인 CRM 시스템")
-    st.markdown("---")
+    st.title("🛡️ 보험 CRM")
     
-    # ====================================================================
-    # 【좌측】 데이터 관리
-    # ====================================================================
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 대시보드", "👥 고객", "🚨 업셀링", "📋 정책", "🤖 AI분석"])
     
-    left_col, right_col = st.columns([1, 1.2], gap="large")
-    
-    with left_col:
-        st.markdown("### 📥 데이터 입력 & 관리")
-        
-        tab1, tab2, tab3 = st.tabs(["엑셀 업로드", "상담 기록", "고객 현황"])
-        
-        # 탭 1: 엑셀 업로드
-        with tab1:
-            st.markdown("**표준 엑셀/CSV 파일 업로드**")
-            st.info("필수 컬럼: 고객번호, 이름, 연락처, 거주권역, 상세주소, 기존암진단비, 기존뇌진단비")
-            
-            uploaded_file = st.file_uploader("파일 선택", type=["xlsx", "csv"])
-            
-            if uploaded_file:
-                try:
-                    if uploaded_file.name.endswith(".csv"):
-                        df = pd.read_csv(uploaded_file)
-                    else:
-                        df = pd.read_excel(uploaded_file)
-                    
-                    st.dataframe(df.head(), use_container_width=True)
-                    
-                    if st.button("🚀 데이터 병합하기", use_container_width=True):
-                        conn = sqlite3.connect(DB_PATH)
-                        cursor = conn.cursor()
-                        
-                        for _, row in df.iterrows():
-                            customer_id = str(row['고객번호']).strip()
-                            cursor.execute("""
-                            INSERT OR REPLACE INTO customers 
-                            (customer_id, name, phone, region, address, cancer_coverage, brain_coverage)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                customer_id,
-                                str(row['이름']).strip(),
-                                str(row['연락처']).strip(),
-                                str(row['거주권역']).strip(),
-                                str(row['상세주소']).strip(),
-                                float(row['기존암진단비']),
-                                float(row['기존뇌진단비'])
-                            ))
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        st.success(f"✅ {len(df)}명 고객 정보 저장 완료!")
-                        st.rerun()
-                
-                except Exception as e:
-                    st.error(f"❌ 오류: {str(e)}")
-        
-        # 탭 2: 상담 기록
-        with tab2:
-            st.markdown("**상담 내용 기록**")
-            
-            conn = sqlite3.connect(DB_PATH)
-            customers_df = pd.read_sql_query("SELECT DISTINCT customer_id, name FROM customers", conn)
+    with tab1:
+        st.header("대시보드")
+        try:
+            conn = sqlite3.connect("insurance_crm.db")
+            cust = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customers'").fetchone() else 0
+            policy = conn.execute("SELECT COUNT(*) FROM policy_updates WHERE reviewed = 1").fetchone()[0] if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='policy_updates'").fetchone() else 0
+            auto = conn.execute("SELECT COUNT(*) FROM policy_updates WHERE auto_detected = 1 AND reviewed = 0").fetchone()[0] if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='policy_updates'").fetchone() else 0
             conn.close()
             
-            if not customers_df.empty:
-                selected_customer = st.selectbox(
-                    "고객 선택",
-                    options=customers_df["customer_id"].tolist(),
-                    format_func=lambda x: f"{x} - {customers_df[customers_df['customer_id']==x]['name'].values[0]}"
-                )
-                
-                note_type = st.selectbox("상담 유형", ["STT 요약", "전화 통화", "방문 상담", "기타"])
-                note_content = st.text_area("상담 내용", height=100)
-                
-                if st.button("💾 저장", use_container_width=True):
-                    conn = sqlite3.connect(DB_PATH)
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                    INSERT INTO consultation_notes (customer_id, note_type, content)
-                    VALUES (?, ?, ?)
-                    """, (selected_customer, note_type, note_content))
+            col1, col2, col3 = st.columns(3)
+            col1.metric("고객", cust)
+            col2.metric("정책", policy)
+            col3.metric("🤖대기", auto)
+        except:
+            st.info("데이터 없음")
+    
+    with tab2:
+        st.header("고객 관리")
+        f = st.file_uploader("엑셀/CSV", type=["xlsx", "csv"])
+        if f:
+            df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+            st.dataframe(df.head())
+            if st.button("저장"):
+                conn = sqlite3.connect("insurance_crm.db")
+                conn.execute("CREATE TABLE IF NOT EXISTS customers (customer_id TEXT PRIMARY KEY, name TEXT, phone TEXT, region TEXT, address TEXT, cancer_coverage REAL, brain_coverage REAL)")
+                for _, row in df.iterrows():
+                    conn.execute("INSERT OR REPLACE INTO customers VALUES (?,?,?,?,?,?,?)",
+                        (str(row['고객번호']).strip(), str(row['이름']).strip(), str(row['연락처']).strip(),
+                         str(row['거주권역']).strip(), str(row['상세주소']).strip(), float(row['기존암진단비']), float(row['기존뇌진단비'])))
+                conn.commit()
+                conn.close()
+                st.success(f"{len(df)}명 저장!")
+    
+    with tab3:
+        st.header("업셀링")
+        d = st.date_input("날짜")
+        r = st.selectbox("지역", ["서울/경기", "부산/영남", "대전/충청", "광주/전라", "대구/경북"])
+        if st.button("검색"):
+            conn = sqlite3.connect("insurance_crm.db")
+            try:
+                c = conn.execute("SELECT customer_id, name, phone, cancer_coverage, brain_coverage FROM customers WHERE cancer_coverage < 5000")
+                rows = c.fetchall()
+            except:
+                rows = []
+            conn.close()
+            
+            if rows:
+                st.write(f"**업셀링 대상: {len(rows)}명**")
+                for cid, name, phone, cancer, brain in rows[:20]:
+                    conn = sqlite3.connect("insurance_crm.db")
+                    latest_policy = conn.execute("SELECT policy_name FROM policy_updates WHERE reviewed = 1 ORDER BY start_date DESC LIMIT 1").fetchone()
+                    conn.close()
+                    
+                    policy_info = f"\n📋 정책: {latest_policy[0]}" if latest_policy else ""
+                    
+                    msg = f"[{name}님]\n암:{cancer:.0f}만 뇌:{brain:.0f}만{policy_info}\n{d.strftime('%m월 %d일')} {r}\nhttps://pro-pipe.app/reserve?id={cid}"
+                    col1, col2 = st.columns([2, 2])
+                    col1.write(f"**{name}** (암: {cancer:.0f}만)")
+                    if col2.button("💬", key=cid):
+                        st.code(msg)
+            else:
+                st.info("대상 없음")
+    
+    with tab4:
+        st.header("정책 관리")
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("정책명")
+        with col2:
+            if st.button("등록"):
+                if name:
+                    conn = sqlite3.connect("insurance_crm.db")
+                    conn.execute("CREATE TABLE IF NOT EXISTS policy_updates (id INTEGER PRIMARY KEY, policy_name TEXT, policy_description TEXT, start_date DATE, ai_confidence REAL, status TEXT, auto_detected BOOLEAN, reviewed BOOLEAN DEFAULT 0)")
+                    conn.execute("INSERT INTO policy_updates (policy_name, policy_description, start_date, ai_confidence, status, auto_detected) VALUES (?,?,?,?,?,?)",
+                        (name, name, datetime.now().date(), 0.5, "대기", 0))
                     conn.commit()
                     conn.close()
-                    st.success("✅ 저장 완료!")
+                    st.success("등록!")
+                    st.rerun()
         
-        # 탭 3: 고객 현황
-        with tab3:
-            st.markdown("**전체 고객 정보**")
-            
-            conn = sqlite3.connect(DB_PATH)
-            customers_df = pd.read_sql_query("SELECT * FROM customers", conn)
-            conn.close()
-            
-            if not customers_df.empty:
-                st.dataframe(customers_df, use_container_width=True)
-                st.write(f"**총 고객 수: {len(customers_df)}명**")
+        st.subheader("검토 대기")
+        conn = sqlite3.connect("insurance_crm.db")
+        try:
+            rows = conn.execute("SELECT id, policy_name, auto_detected FROM policy_updates WHERE reviewed = 0").fetchall()
+            if rows:
+                for pid, pname, auto in rows:
+                    badge = "🤖" if auto else "👤"
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    col1.write(f"{badge} {pname}")
+                    if col2.button("✅", key=f"a{pid}", use_container_width=True):
+                        conn.execute("UPDATE policy_updates SET reviewed = 1 WHERE id = ?", (pid,))
+                        conn.commit()
+                        st.rerun()
+                    if col3.button("❌", key=f"r{pid}", use_container_width=True):
+                        conn.execute("UPDATE policy_updates SET reviewed = 1, status = '거절' WHERE id = ?", (pid,))
+                        conn.commit()
+                        st.rerun()
             else:
-                st.info("아직 고객 정보가 없습니다.")
-    
-    # ====================================================================
-    # 【우측】 업셀링 감지 & 카톡 발송
-    # ====================================================================
-    
-    with right_col:
-        st.markdown("### 🚨 업셀링 감지 & 카톡 발송")
-        
-        # 출장 정보 입력
-        st.markdown("**출장 정보 설정**")
-        travel_date = st.date_input("출장 날짜", value=datetime.now())
-        travel_region = st.selectbox("출장 지역", ["서울/경기", "부산/영남", "대전/충청", "광주/전라", "대구/경북"])
-        
-        if st.button("🔍 업셀링 대상 검색", use_container_width=True):
-            conn = sqlite3.connect(DB_PATH)
-            customers_df = pd.read_sql_query("SELECT * FROM customers", conn)
+                st.info("정책 없음")
+        except:
+            st.info("정책 없음")
+        finally:
             conn.close()
+    
+    with tab5:
+        st.header("🤖 AI 정책 분석")
+        
+        subtab1, subtab2 = st.tabs(["📝 텍스트", "📸 이미지 OCR"])
+        
+        with subtab1:
+            st.write("**뉴스/공지사항 텍스트를 붙여넣으면 AI가 정책을 자동 추출합니다**")
             
-            if customers_df.empty:
-                st.warning("⚠️ 고객 데이터를 먼저 업로드해주세요.")
-            else:
-                # 업셀링 대상 (암보장 5000만 미만)
-                upsell_targets = customers_df[customers_df['cancer_coverage'] < 5000]
-                
-                if not upsell_targets.empty:
-                    st.markdown(f"### 🚨 업셀링 대상자 ({len(upsell_targets)}명)")
-                    
-                    for _, row in upsell_targets.iterrows():
-                        c_id = row['customer_id']
-                        c_name = row['name']
-                        c_cancer = row['cancer_coverage']
-                        c_stroke = row['brain_coverage']
-                        c_phone = row['phone']
-                        c_address = row['address']
-                        
-                        # 비즈니스 로직: 맞춤 메시지 생성
-                        msg = f"""[{c_name} 고객님 기존 보장 상향 안내]
-
-안녕하세요, 담당 설계사입니다.
-
-📊 가입 분석 결과:
-- 최신 업계 표준: 최소 5,000만 원 보장 권장
-- 근거: 금융감독원 및 보험협회 최신 공시 개정 표준
-- ❌ 고객님 기존: 암 {int(c_cancer):,}만 / 뇌 {int(c_stroke):,}만
-
-{travel_date.strftime('%m월 %d일')}에 {travel_region} 출장 가는 길에 상향 설계안을 전해드리겠습니다.
-
-🔗 예약 링크: https://pro-pipe.app/reserve?id={c_id}"""
-                        
-                        # 카톡 링크 생성
-                        encoded_msg = quote(msg)
-                        kakao_url = f"kakaolink://send?formatted_text={encoded_msg}"
-                        
-                        # UI 표시
-                        st.markdown(f"""
-                        <div class="customer-card">
-                            <b>{c_name}</b> (ID: {c_id}) - 🚨 업셀링 대상<br>
-                            <small>📞 {c_phone} | 📍 {c_address}</small><br>
-                            <small>암: {int(c_cancer):,}만원 / 뇌: {int(c_stroke):,}만원</small>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # 카톡 발송 버튼
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown(f'<a href="{kakao_url}" target="_blank" style="background:#FFE812; color:#000; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold; display:inline-block; width:100%; text-align:center;">💬 카톡 발송</a>', unsafe_allow_html=True)
-                        
-                        with col2:
-                            if st.button(f"📋 복사", key=f"copy_{c_id}", use_container_width=True):
-                                st.code(msg)
-                
+            text_input = st.text_area("텍스트 붙여넣기", placeholder="뉴스나 공지사항 텍스트...", height=150, key="text_input")
+            
+            if st.button("🔍 AI로 정책 추출", use_container_width=True, key="text_analyze"):
+                if not text_input.strip():
+                    st.warning("⚠️ 텍스트를 입력하세요")
                 else:
-                    st.info("✅ 모든 고객이 기준을 충족합니다.")
+                    analyze_text(text_input)
         
-        # 지역별 필터링
-        st.markdown("---")
-        st.markdown("### ✈️ 지역별 고객 필터링")
-        
-        conn = sqlite3.connect(DB_PATH)
-        customers_df = pd.read_sql_query("SELECT * FROM customers", conn)
-        conn.close()
-        
-        if not customers_df.empty:
-            regions = customers_df["region"].dropna().unique().tolist()
+        with subtab2:
+            st.write("**카톡 스크린샷이나 뉴스 이미지를 업로드하면 OCR로 텍스트를 추출합니다**")
             
-            if regions:
-                selected_region = st.selectbox("출장 지역 선택", options=regions, key="region_filter")
+            img_file = st.file_uploader("이미지 업로드 (JPG, PNG)", type=["jpg", "jpeg", "png"])
+            
+            if img_file:
+                image = Image.open(img_file)
+                st.image(image, caption="업로드된 이미지")
                 
-                if st.button("🗺️ 필터링", use_container_width=True):
-                    filtered_df = customers_df[customers_df['region'] == selected_region]
-                    
-                    if not filtered_df.empty:
-                        st.success(f"✅ {selected_region}권역 고객 {len(filtered_df)}명")
-                        st.dataframe(filtered_df[["customer_id", "name", "phone", "address"]], use_container_width=True)
-                    else:
-                        st.warning(f"⚠️ {selected_region}권역의 고객이 없습니다.")
+                if st.button("🔍 이미지에서 텍스트 추출", use_container_width=True, key="img_analyze"):
+                    with st.spinner("📖 이미지 분석 중..."):
+                        try:
+                            # pytesseract로 OCR 시도
+                            import pytesseract
+                            extracted_text = pytesseract.image_to_string(image, lang='kor')
+                            
+                            if extracted_text.strip():
+                                st.success("✅ 텍스트 추출 완료!")
+                                st.text_area("추출된 텍스트", extracted_text, height=150, disabled=True)
+                                
+                                if st.button("➡️ 이 텍스트로 분석", use_container_width=True):
+                                    analyze_text(extracted_text)
+                            else:
+                                st.warning("⚠️ 이미지에서 텍스트를 찾을 수 없습니다")
+                        
+                        except ImportError:
+                            st.error("⚠️ Tesseract OCR이 설치되지 않았습니다")
+                            st.info("💡 대신 이미지의 텍스트를 수동으로 복사해서 '📝 텍스트' 탭에서 분석하세요")
+                        except Exception as e:
+                            st.error(f"❌ 오류: {str(e)}")
+                            st.info("💡 이미지의 텍스트를 수동으로 복사해서 '📝 텍스트' 탭에서 분석하세요")
+
+def analyze_text(text_input):
+    """텍스트에서 정책 추출 함수"""
+    keywords = {
+        "5세대": ("5세대 실손보험", 0.85),
+        "실손": ("실손의료보험", 0.80),
+        "암진단": ("암진단비", 0.85),
+        "암보": ("암보장", 0.85),
+        "특약": ("특약", 0.70),
+        "갱신": ("계약갱신", 0.70),
+        "금감원": ("금감원 정책", 0.75),
+        "보험협회": ("보험협회 공시", 0.75),
+        "의료보험": ("의료보험", 0.75),
+        "진단비": ("진단비 기준", 0.75),
+        "할인": ("보험료 할인", 0.70),
+        "보장": ("보장 강화", 0.60),
+        "보험료": ("보험료", 0.60),
+    }
     
-    # 하단 정보
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #a0aec0; font-size: 12px;">
-    🛡️ 보험 파이프라인 CRM v2.0 | Streamlit Cloud
-    </div>
-    """, unsafe_allow_html=True)
+    conn = sqlite3.connect("insurance_crm.db")
+    conn.execute("CREATE TABLE IF NOT EXISTS policy_updates (id INTEGER PRIMARY KEY, policy_name TEXT, policy_description TEXT, start_date DATE, ai_confidence REAL, status TEXT, auto_detected BOOLEAN, reviewed BOOLEAN DEFAULT 0)")
+    
+    detected = []
+    text_lower = text_input.lower()
+    
+    for keyword, (policy_name, conf) in keywords.items():
+        if keyword in text_lower:
+            check = conn.execute("SELECT id FROM policy_updates WHERE policy_name = ?", (policy_name,)).fetchone()
+            if not check:
+                conn.execute("INSERT INTO policy_updates (policy_name, policy_description, start_date, ai_confidence, status, auto_detected) VALUES (?,?,?,?,?,?)",
+                    (policy_name, text_input[:200], datetime.now().date(), conf, "대기", 1))
+                detected.append((policy_name, conf))
+    
+    conn.commit()
+    conn.close()
+    
+    if detected:
+        st.success(f"✅ {len(detected)}개 정책 추출!")
+        for pname, conf in detected:
+            st.write(f"- **{pname}** (신뢰도: {conf*100:.0f}%)")
+        st.info("📌 탭4에서 [✅]를 눌러 승인하세요!")
+    else:
+        st.info("💡 관련 정책이 없습니다")
+
+st.markdown("---\n<div style='text-align:center;font-size:11px;color:#888;'>🛡️ 보험 파이프라인 CRM</div>", unsafe_allow_html=True)
