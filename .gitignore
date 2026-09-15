@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+*.db
+insurance_crm.db
+__pycache__/
+*.pyc
+.env
